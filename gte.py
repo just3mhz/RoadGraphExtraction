@@ -20,6 +20,7 @@ class GraphTensorEncoder:
         self.radius = 1
         self.pv_threshold = pv_threshold
         self.pe_threshold = pe_threshold
+        self.w = 100
 
     def encode(self, graph):
         encoded = np.zeros((self.image_size, self.image_size, 3 * self.max_degree + 1))
@@ -28,7 +29,9 @@ class GraphTensorEncoder:
 
             for x, y in _shifts(xv, yv, self.radius):
                 #  Probability of having vertex at position (x, y)
-                encoded[x, y, 0] = 1
+                encoded[x, y, 0] = 0.9
+
+            encoded[xv, yv, 0] = 1.0
 
             for i, (xu, yu) in enumerate(graph[(xv, yv)]):
                 dx = xu - xv
@@ -49,8 +52,7 @@ class GraphTensorEncoder:
         return encoded
 
     def decode(self, encoded):
-        vertexes = self._detect_vertexes(filters.gaussian_filter(encoded[:, :, 0], 1))
-        print(vertexes)
+        vertexes = self._detect_vertexes(filters.gaussian_filter(encoded[:, :, 0], 1, mode='constant'))
         #  Insert vertexes in rtree to speed up queries
         rtree_index = rt.Index()
         for i, (xv, yv) in enumerate(vertexes):
@@ -78,8 +80,9 @@ class GraphTensorEncoder:
                 def dist(xu, yu):
                     v0 = np.array([xv + dx, yv + dy])
                     v1 = np.array([xu, yu])
-                    v3 = np.array([xu - xv, yu - yv])
-                    return distance.euclidean(v0, v1) + 100 * distance.cosine(v1, v3)
+                    v2 = np.array([xu - xv, yu - yv])
+                    v3 = np.array([dx, dy])
+                    return distance.euclidean(v0, v1) + self.w * distance.cosine(v2, v3)
 
                 for c in candidates:
                     if c == i:
@@ -117,7 +120,7 @@ if __name__ == '__main__':
         (2, 8): [(1, 1), (5, 7)],
         (5, 3): [(5, 7), (8, 1)],
         (5, 7): [(2, 8), (5, 3)],
-        (8, 1): [(5, 2)]
+        (8, 1): [(5, 3)]
     }
 
     encoder = GraphTensorEncoder(10, 6, 5)
