@@ -1,8 +1,10 @@
 import numpy as np
 import rtree as rt
 
-from scipy.ndimage import morphology
-from scipy.ndimage import filters
+from scipy.ndimage import gaussian_filter
+from scipy.ndimage import generate_binary_structure
+from scipy.ndimage import binary_erosion
+from scipy.ndimage import maximum_filter
 from scipy.spatial import distance
 
 
@@ -52,7 +54,7 @@ class GraphTensorEncoder:
         return encoded
 
     def decode(self, encoded):
-        vertexes = self._detect_vertexes(filters.gaussian_filter(encoded[:, :, 0], 1, mode='constant'))
+        vertexes = self._detect_vertexes(gaussian_filter(encoded[:, :, 0], 1, mode='constant'))
         #  Insert vertexes in rtree to speed up queries
         rtree_index = rt.Index()
         for i, (xv, yv) in enumerate(vertexes):
@@ -99,13 +101,13 @@ class GraphTensorEncoder:
         return graph
 
     def _detect_vertexes(self, vertex_channel):
-        neighborhood = morphology.generate_binary_structure(len(vertex_channel.shape), 2)
+        neighborhood = generate_binary_structure(len(vertex_channel.shape), 2)
 
-        local_max = (filters.maximum_filter(vertex_channel, footprint=neighborhood) == vertex_channel)
+        local_max = (maximum_filter(vertex_channel, footprint=neighborhood) == vertex_channel)
 
         background = (vertex_channel == 0)
 
-        eroded_background = morphology.binary_erosion(
+        eroded_background = binary_erosion(
             background, structure=neighborhood, border_value=1)
 
         detected_maxima = local_max ^ eroded_background
