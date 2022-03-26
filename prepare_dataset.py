@@ -1,7 +1,11 @@
 import os
+import json
 import argparse
 import logging
 import subprocess
+import pickle
+
+from collections import defaultdict
 
 import geopandas as gpd
 import numpy as np
@@ -9,6 +13,8 @@ import osmnx as ox
 from osgeo import gdal
 from osgeo import osr
 from osgeo import ogr
+
+from geometry import Transform
 
 def convert_to_8_bit(input_file: str, output_file: str, output_pixel_type: str = "Byte", output_format: str = "GTiff"):
     percentiles = (2, 98)
@@ -82,10 +88,45 @@ def make_mask(gdf, tile_path: str, output_path: str, burn_value: int = 150):
     gdal.RasterizeLayer(target, [1], output_layer, burn_values=[burn_value])
 
 
+def make_graph(tile, geojson):
+    raster_src = gdal.Open(tile)
+    
+    #  Get top-left and bottom-right corners 
+    lon0, xres, xskew, lat0, yskew, yres  = raster_src.GetGeoTransform()
+    lon1 = lon0 + (raster_src.RasterXSize * xres)
+    lat1 = lat0 + (raster_src.RasterYSize * yres)
+
+    #  Transform to image rect coords
+    transform = Transform(lon0, lat0, lon1, lat1, raster_src.RasterXSize, raster_src.RasterYSize)
+
+    graph = defaultdict(set)
+    features = json.load(open(geojson, 'r'))['features']
+    for feature in features:
+        geometry = feature['geometry']
+        if geometry['type'] == 'LineString':
+            array = np.array(geometry['coordinates']).T
+            x, y = transform(array[0], array[1])
+            n = x.shape[0]
+            for i in range(1, n):
+                graph[(x[i-1], y[i-1])].add((x[i], y[i]))
+                graph[(x[i], y[i])].add((x[i-1], y[i-1]))
+        if geometry['type'] == 'MultiLineString':
+            for line in geometry['coordinates']:
+                array = np.array(line).T
+                x, y = transform(array[0], array[1])
+                n = x.shape[0]
+                for i in range(1, n):
+                    graph[(x[i-1], y[i-1])].add((x[i], y[i]))
+                    graph[(x[i], y[i])].add((x[i-1], y[i-1]))
+    return graph
+
+
 if __name__ == '__main__':
-    convert_to_8_bit('input.tif', 'output.tif')
-    make_mask(
-            create_buffer_geopandas('input.geojson', 2, 6),
-            'input.tif',
-            'output_mask.tif')
+    convert_to_8_bit('notebooks/media/input.tif', 'notebooks/media/output.tif')
+    make_mask(create_buffer_geopandas('notebooks/media/input.geojson', 2, 6),
+              'notebooks/media/input.tif',
+              'notebooks/media/output_mask.tif')
+
+    pickle.dump(make_graph('notebooks/media/input.tif','notebooks/media/input.geojson'),
+                open('notebooks/media/output.pickle'))
 
