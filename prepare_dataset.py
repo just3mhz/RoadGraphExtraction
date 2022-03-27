@@ -121,12 +121,32 @@ def make_graph(tile, geojson):
     return graph
 
 
-if __name__ == '__main__':
-    convert_to_8_bit('notebooks/media/input.tif', 'notebooks/media/output.tif')
-    make_mask(create_buffer_geopandas('notebooks/media/input.geojson', 2, 6),
-              'notebooks/media/input.tif',
-              'notebooks/media/output_mask.tif')
+def make_data(tile_path, geojson_path, output_dir, label):
+    convert_to_8_bit(tile_path, os.path.join(output_dir, f'{label}_8bit.tif'))
+    make_mask(create_buffer_geopandas(geojson_path, 2, 6), tile_path, os.path.join(output_dir, f'{label}_mask.tif'))
+    pickle.dump(make_graph(tile_path, geojson_path), open(os.path.join(output_dir, f'{label}_graph.pickle'), 'wb'))
 
-    pickle.dump(make_graph('notebooks/media/input.tif','notebooks/media/input.geojson'),
-                open('notebooks/media/output.pickle'))
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--images-dir', required=True)
+    parser.add_argument('--geojsons-dir', required=True)
+    parser.add_argument('--city', required=True)
+    parser.add_argument('--output-dir', required=True)
+    args = parser.parse_args()
+    
+    output_dir = os.path.join(args.output_dir, args.city)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    for i, image in enumerate(os.listdir(args.images_dir)):
+        base_name = image.split('.')[0]
+        geojson = base_name + '.geojson'
+        try:
+            make_data(os.path.join(args.images_dir, image),
+                      os.path.join(args.geojsons_dir, geojson),
+                      output_dir,
+                      f'tile_{i}')
+        except Exception as e:
+            logging.warning(f"Exception while processing {image} | {geojson} | {e}")
 
