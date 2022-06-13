@@ -1,7 +1,10 @@
+import tensorflow as tf
+from tensorflow.keras.metrics import binary_crossentropy
 from tensorflow.keras import Model
 from tensorflow.keras import layers
 from tensorflow.keras.applications.resnet import ResNet50
 
+from common import unstack
 
 def conv_block(inputs, filters):
     x = layers.Conv2D(filters, 3, padding='same')(inputs)
@@ -22,17 +25,40 @@ def decoder_block(inputs, skip_features, filters):
     return x
 
 
-def resnet50_unet(input_shape):
+class GteOutput(layers.Layer):
+    def __init__(self, max_degree=6, *args, **kwargs):
+        super(GteOutput, self).__init__(*args, **kwargs)
+        self.max_degree = max_degree
+
+    def call(self, inputs):
+        outputs = unstack(inputs)
+        outputs[0] = tf.math.sigmoid(outputs[0])
+        for i in range(self.max_degree):
+            outputs[1 + 3*i] = tf.math.sigmoid(outputs[1 + 3*i])
+        return tf.concat(outputs, axis=3)
+
+    def get_config(self):
+        return {
+            'max_degree': self.max_degree,
+        }
+
+    @classmethod
+    def from_config(cls, config):
+        print('???')
+        return cls(**config)
+
+
+def resnet50_unet(input_shape, max_degree=6):
     inputs = layers.Input(shape=input_shape, name='input')
 
     # Pre-trained resnet50
     resnet50 = ResNet50(include_top=False, weights='imagenet', input_tensor=inputs)
 
     # Skip connections
-    s1 = resnet50.get_layer('input').output
-    s2 = resnet50.get_layer('conv1_relu').output
-    s3 = resnet50.get_layer('conv2_block3_out').output
-    s4 = resnet50.get_layer('conv3_block4_out').output
+    s1 = resnet50.get_layer('input').output                   # x1
+    s2 = resnet50.get_layer('conv1_relu').output              # x2
+    s3 = resnet50.get_layer('conv2_block3_out').output        # x4
+    s4 = resnet50.get_layer('conv3_block4_out').output        # x8
 
     # Bridge
     b1 = resnet50.get_layer('conv4_block6_out').output
@@ -43,7 +69,11 @@ def resnet50_unet(input_shape):
     d3 = decoder_block(d2, s2, 128)
     d4 = decoder_block(d3, s1, 64)
 
-    outputs = layers.Conv2D(1, 1, padding='same', activation='sigmoid', name='output')(d4)
+    raw_outputs = layers.Conv2D(
+        1 + 3 * max_degree, kernel_size=(3, 3),
+        padding='same', activation='linear', name='raw_output')(d4)
+
+    outputs = GteOutput(max_degree=max_degree, name='gte_outputs')(raw_outputs)
 
     return Model(inputs, outputs, name='resnet50_unet')
 
